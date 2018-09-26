@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "baseUrl": "./src/main",
+    "declaration": true,
+    "lib": [ "es5", "es2015.core", "es2015.promise", "es2015.collection", "es2015.iterable" ],
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "outDir": "./dist",
+    "paths": {
+      "*": [
+        "../../node_modules/@types/*",
+        "../../node_modules/*"
+      ]
+    },
+    "skipLibCheck": true,
+    "strict": true,
+    "stripInternal": true,
+    "target": "es2015"
+  },
+  "include": [
+    "./src/main/**/*.ts"
+  ]
+}
