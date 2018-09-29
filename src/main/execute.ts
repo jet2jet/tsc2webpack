@@ -210,10 +210,9 @@ function watchTsc(config: TscBuildConfig, handlers: Handlers | undefined, locale
 
 function initializeWebpackConfiguration(
 	tscBuildResult: TscBuildResult,
-	handlers: Handlers | undefined,
 	conf: webpack.Configuration | null | undefined,
 	watch: boolean,
-	emitDeclarations: boolean | undefined
+	options: Options | undefined
 ) {
 	const tempOutDir = path.resolve(tscBuildResult.data.compilerOptions.outDir!);
 
@@ -240,8 +239,8 @@ function initializeWebpackConfiguration(
 			loader: path.resolve(path.dirname(module.filename), './webpack/ts-file-loader'),
 			options: {
 				tscBuildResult: tscBuildResult,
-				handlers: handlers,
-				emitDeclarations: emitDeclarations
+				handlers: options && options.handlers,
+				emitDeclarations: options && options.emitDeclarations
 			}
 		}]
 	} as webpack.RuleSetRule].concat(...(moduleConf.rules || []));
@@ -270,19 +269,18 @@ function handleWebpackLog(handlers: Handlers | undefined, stats: webpack.Stats) 
 function executeWebpack(
 	tscBuildResult: TscBuildResult,
 	conf: webpack.Configuration | null | undefined,
-	handlers: Handlers | undefined,
-	emitDeclarations: boolean | undefined
+	options: Options | undefined
 ): Promise<void> {
 	const config = initializeWebpackConfiguration(
 		tscBuildResult,
-		handlers,
 		conf,
 		false,
-		emitDeclarations
+		options
 	);
 	delete config.watch;
 	const compiler = webpack(config);
 
+	const handlers = options && options.handlers;
 	return new Promise<void>((resolve) => {
 		compiler.run((err, stat) => {
 			//console.log('**', err, stat);
@@ -303,18 +301,17 @@ function executeWebpack(
 function watchWebpack(
 	tscBuildResult: TscBuildResult,
 	conf: webpack.Configuration | null | undefined,
-	handlers: Handlers | undefined,
-	emitDeclarations: boolean | undefined
+	options: Options | undefined
 ): Promise<WatchInstance> {
 	const config = initializeWebpackConfiguration(
 		tscBuildResult,
-		handlers,
 		conf,
 		true,
-		emitDeclarations
+		options
 	);
 	const compiler = webpack(config);
 
+	const handlers = options && options.handlers;
 	let isWatching = false;
 	return new Promise<webpack.Compiler.Watching>((resolve) => {
 		let lastHash: string | undefined;
@@ -407,8 +404,7 @@ export async function execute(
 			() => executeWebpack(
 				tscBuildResult,
 				webpackConfig,
-				handlers,
-				options && options.emitDeclarations
+				options
 			)
 		);
 	});
@@ -468,8 +464,7 @@ export async function watch(
 			() => watchWebpack(
 				tscBuildResult,
 				webpackConfig,
-				handlers,
-				options && options.emitDeclarations
+				options
 			)
 		);
 		return {
@@ -561,10 +556,9 @@ export function createWebpackFunction(
 		if (conf instanceof Array) {
 			const newConf = conf.map((c) => initializeWebpackConfiguration(
 				tscBuildResult,
-				handlers,
 				c,
 				watchMode,
-				options && options.emitDeclarations
+				options
 			));
 			if (handler) {
 				return webpack(newConf, handler as webpack.MultiCompiler.Handler);
@@ -574,10 +568,9 @@ export function createWebpackFunction(
 		} else {
 			const newConf = initializeWebpackConfiguration(
 				tscBuildResult,
-				handlers,
 				conf,
 				watchMode,
-				options && options.emitDeclarations
+				options
 			);
 			if (handler) {
 				return webpack(newConf, handler as webpack.Compiler.Handler);
