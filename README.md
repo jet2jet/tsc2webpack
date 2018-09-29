@@ -7,7 +7,7 @@ tsc2webpack
 
 ## When to use
 
-Usually, when packing TypeScript files with webpack, using the webpack loader for TypeScript files such as ts-loader or awesome-typescript-loader is one of the easiest ways. If you are not familiar with webpack, I recommend to use those loaders instead of tsc2webpack.
+Usually, when packing TypeScript files with webpack, using the webpack loader for TypeScript files such as `ts-loader` or `awesome-typescript-loader` is one of the easiest ways. If you are not familiar with webpack, I recommend to use those loaders instead of tsc2webpack.
 
 tsc2webpack simply executes TypeScript compiler and webpack (watch mode is supported). This intends to speed up execution by compiling all TypeScript files first rather than using loaders, which compiles file by file.
 
@@ -96,6 +96,35 @@ Enables the verbose mode (detailed logs / messages will be outputted).
 
 Shows the version number.
 
+## Applying additional loaders for TypeScript files
+
+tsc2webpack uses an internal loader for webpack to load TypeScript files as JavaScript files.
+If additional loaders such as `babel-loader` are necessary, use `AdditionalLoadersPlugin` as followings:
+
+```js
+const AdditionalLoadersPlugin = require('tsc2webpack').AdditionalLoadersPlugin;
+
+// webpack configuration
+module.exports = {
+    ... // existing settings
+    plugins: [
+        new AdditionalLoadersPlugin(
+            // 'head' loaders (optional parameter; can be null)
+            [{
+                loader: 'babel-loader',
+                options: { presets: ['@babel/preset-env'] }
+            }],
+            // 'tail' loaders (optional parameter; can be null)
+            []
+        )
+    ]
+};
+```
+
+NOTE: In webpack, loaders in 'use' array are applied in reverse order (from tail to head).
+In above case, `babel-loader` *is appended before* tsc2webpack's internal loader in the configuration,
+and `babel-loader` *is applied after* the internal loader.
+
 ## Examples
 
 ```
@@ -106,7 +135,7 @@ tsc2webpack -p ./tsconfig.json -c ./build/webpack.config.js
 
 Type definitions are available in `dist/index.d.ts` (defined in package.json). Please refer to the type definitions to see detailed API descriptions.
 
-```
+```js
 import {
     // functions
     execute,
