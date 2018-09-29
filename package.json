@@ -2,7 +2,8 @@
   "author": "jet",
   "bin": "./dist/main.js",
   "dependencies": {
-    "loader-utils": "~1.1.0"
+    "loader-utils": "~1.1.0",
+    "yargs": "~12.0.2"
   },
   "description": "A build tool that calls TypeScript compiler and webpack process sequentially",
   "devDependencies": {
@@ -11,8 +12,7 @@
     "@types/webpack": "4",
     "@types/yargs": "^12.0.0",
     "typescript": "2.7",
-    "webpack": "4",
-    "yargs": "^12.0.2"
+    "webpack": "4"
   },
   "engines": {
     "node": ">=6"
