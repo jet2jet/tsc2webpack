@@ -17,4 +17,9 @@ export {
 	WatchInstance
 };
 
+import AdditionalLoadersPlugin from './webpack/AdditionalLoadersPlugin';
+export {
+	AdditionalLoadersPlugin
+};
+
 export * from './execute';

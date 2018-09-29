@@ -35,7 +35,9 @@ export default interface Options {
 	 * NOTE: In webpack, loaders in 'use' array are applied in reverse order (from tail to head).
 	 */
 	loadersForTsFiles?: {
+		/** 'use' item(s) to be added into 'use' array *before* tsc2webpack's internal loader */
 		head?: webpack.RuleSetUseItem | webpack.RuleSetUseItem[];
+		/** 'use' item(s) to be added into 'use' array *after* tsc2webpack's internal loader */
 		tail?: webpack.RuleSetUseItem | webpack.RuleSetUseItem[];
 	};
 }

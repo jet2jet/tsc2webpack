@@ -24,7 +24,10 @@ import { handleError, logInfo, logVerbose } from './utils/log';
 
 /** @internal */
 import './webpack/tsc2webpack-loader';
+import AdditionalLoadersPlugin from './webpack/AdditionalLoadersPlugin';
 import WatchReplacePlugin from './webpack/WatchReplacePlugin';
+
+const tsc2webpackLoaderName = 'tsc2webpack-loader';
 
 const createProgramForWatching = ts.createSemanticDiagnosticsBuilderProgram;
 
@@ -208,6 +211,27 @@ function watchTsc(config: TscBuildConfig, handlers: Handlers | undefined, locale
 
 ////////////////////////////////////////////////////////////////////////////////
 
+function applyAdditionalLoaders(
+	ruleSetItems: webpack.RuleSetUseItem[],
+	head: webpack.RuleSetUseItem | webpack.RuleSetUseItem[] | null | undefined,
+	tail: webpack.RuleSetUseItem | webpack.RuleSetUseItem[] | null | undefined
+) {
+	if (head) {
+		if (Array.isArray(head)) {
+			ruleSetItems.unshift(...head);
+		} else {
+			ruleSetItems.unshift(head);
+		}
+	}
+	if (tail) {
+		if (Array.isArray(tail)) {
+			ruleSetItems.push(...tail);
+		} else {
+			ruleSetItems.push(tail);
+		}
+	}
+}
+
 function initializeWebpackConfiguration(
 	tscBuildResult: TscBuildResult,
 	conf: webpack.Configuration | null | undefined,
@@ -232,32 +256,29 @@ function initializeWebpackConfiguration(
 	}
 
 	// add rule for pre-compiled TypeScript files
+	const moduleConf = (newConf.module || (newConf.module = { rules: [] }));
 	const ruleSetItems: webpack.RuleSetUseItem[] = [{
-		loader: path.resolve(path.dirname(module.filename), './webpack/tsc2webpack-loader'),
+		loader: path.resolve(path.dirname(module.filename), `./webpack/${tsc2webpackLoaderName}`),
 		options: {
 			tscBuildResult: tscBuildResult,
 			handlers: options && options.handlers,
 			emitDeclarations: options && options.emitDeclarations
 		}
 	}];
+	const newPlugins = (newConf.plugins || (newConf.plugins = [])).reduce((prev, plugin) => {
+		// pick-up and remove AdditionalLoadersPlugin
+		if (plugin instanceof AdditionalLoadersPlugin) {
+			applyAdditionalLoaders(ruleSetItems, plugin.head, plugin.tail);
+		} else {
+			prev.push(plugin);
+		}
+		return prev;
+	}, <webpack.Plugin[]>[]);
+	newConf.plugins = newPlugins;
 	const additionalLoaders = options && options.loadersForTsFiles;
 	if (additionalLoaders) {
-		if (additionalLoaders.head) {
-			if (Array.isArray(additionalLoaders.head)) {
-				ruleSetItems.unshift(...additionalLoaders.head);
-			} else {
-				ruleSetItems.unshift(additionalLoaders.head);
-			}
-		}
-		if (additionalLoaders.tail) {
-			if (Array.isArray(additionalLoaders.tail)) {
-				ruleSetItems.push(...additionalLoaders.tail);
-			} else {
-				ruleSetItems.push(additionalLoaders.tail);
-			}
-		}
+		applyAdditionalLoaders(ruleSetItems, additionalLoaders.head, additionalLoaders.tail);
 	}
-	const moduleConf = (newConf.module || (newConf.module = { rules: [] }));
 	moduleConf.rules = [{
 		test: (input: string) => isTsProjectSourceFile(tscBuildResult, input),
 		use: ruleSetItems
@@ -266,7 +287,7 @@ function initializeWebpackConfiguration(
 	if (watch) {
 		// For watch mode, use internal WatchReplacePlugin to detect changes
 		// js files emitted by TypeScript compiler.
-		(newConf.plugins || (newConf.plugins = [])).push(
+		newPlugins.push(
 			new WatchReplacePlugin(tscBuildResult, tempOutDir)
 		);
 	}
