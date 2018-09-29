@@ -1,4 +1,6 @@
 
+import * as webpack from 'webpack';
+
 import Handlers from './Handlers';
 
 /**
@@ -25,4 +27,15 @@ export default interface Options {
 	 * NOTE: No declaration files will be emitted unless 'declaration' flag in the tsconfig.json is true.
 	 */
 	emitDeclarations?: boolean;
+	/**
+	 * Additional webpack loaders for TypeScript files.
+	 * Loaders in 'head' will be added into 'use' array *before* tsc2webpack's internal loader, and
+	 * loaders in 'tail' will be added *after* the internal loader.
+	 *
+	 * NOTE: In webpack, loaders in 'use' array are applied in reverse order (from tail to head).
+	 */
+	loadersForTsFiles?: {
+		head?: webpack.RuleSetUseItem | webpack.RuleSetUseItem[];
+		tail?: webpack.RuleSetUseItem | webpack.RuleSetUseItem[];
+	};
 }

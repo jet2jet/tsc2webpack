@@ -232,17 +232,35 @@ function initializeWebpackConfiguration(
 	}
 
 	// add rule for pre-compiled TypeScript files
+	const ruleSetItems: webpack.RuleSetUseItem[] = [{
+		loader: path.resolve(path.dirname(module.filename), './webpack/tsc2webpack-loader'),
+		options: {
+			tscBuildResult: tscBuildResult,
+			handlers: options && options.handlers,
+			emitDeclarations: options && options.emitDeclarations
+		}
+	}];
+	const additionalLoaders = options && options.loadersForTsFiles;
+	if (additionalLoaders) {
+		if (additionalLoaders.head) {
+			if (Array.isArray(additionalLoaders.head)) {
+				ruleSetItems.unshift(...additionalLoaders.head);
+			} else {
+				ruleSetItems.unshift(additionalLoaders.head);
+			}
+		}
+		if (additionalLoaders.tail) {
+			if (Array.isArray(additionalLoaders.tail)) {
+				ruleSetItems.push(...additionalLoaders.tail);
+			} else {
+				ruleSetItems.push(additionalLoaders.tail);
+			}
+		}
+	}
 	const moduleConf = (newConf.module || (newConf.module = { rules: [] }));
 	moduleConf.rules = [{
 		test: (input: string) => isTsProjectSourceFile(tscBuildResult, input),
-		use: [{
-			loader: path.resolve(path.dirname(module.filename), './webpack/tsc2webpack-loader'),
-			options: {
-				tscBuildResult: tscBuildResult,
-				handlers: options && options.handlers,
-				emitDeclarations: options && options.emitDeclarations
-			}
-		}]
+		use: ruleSetItems
 	} as webpack.RuleSetRule].concat(...(moduleConf.rules || []));
 
 	if (watch) {
