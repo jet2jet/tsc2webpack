@@ -23,7 +23,7 @@ import {
 import { handleError, logInfo, logVerbose } from './utils/log';
 
 /** @internal */
-import './webpack/ts-file-loader';
+import './webpack/tsc2webpack-loader';
 import WatchReplacePlugin from './webpack/WatchReplacePlugin';
 
 const createProgramForWatching = ts.createSemanticDiagnosticsBuilderProgram;
@@ -236,7 +236,7 @@ function initializeWebpackConfiguration(
 	moduleConf.rules = [{
 		test: (input: string) => isTsProjectSourceFile(tscBuildResult, input),
 		use: [{
-			loader: path.resolve(path.dirname(module.filename), './webpack/ts-file-loader'),
+			loader: path.resolve(path.dirname(module.filename), './webpack/tsc2webpack-loader'),
 			options: {
 				tscBuildResult: tscBuildResult,
 				handlers: options && options.handlers,

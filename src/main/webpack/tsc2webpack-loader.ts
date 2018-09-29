@@ -17,7 +17,7 @@ import { logInfo } from '../utils/log';
  * An internal loader for loading .ts(x) files as .js files
  * @internal
  */
-export default function tsFileLoader(this: webpack.loader.LoaderContext, input: any, inputMap: any) {
+export default function tsc2webpackLoader(this: webpack.loader.LoaderContext, input: any, inputMap: any) {
 	this.cacheable && this.cacheable();
 
 	const options = getOptions(this);
