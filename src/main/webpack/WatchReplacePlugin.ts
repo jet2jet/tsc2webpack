@@ -10,33 +10,8 @@ import {
 	isTsProjectSourceFile
 } from '../utils/functions';
 
-interface WatchFileSystemWatchCallback {
-	(
-		err: Error | null | undefined,
-		filesModified?: string[],
-		dirsModified?: string[],
-		missingModified?: string[],
-		fileTimestamps?: Map<string, number>,
-		dirTimestamps?: Map<string, number>
-	): void;
-}
-
-interface WatchFileSystem {
-	watch(
-		files: string[],
-		dirs: string[],
-		missing: string[],
-		startTime: number,
-		options: any,
-		callback: WatchFileSystemWatchCallback,
-		callbackUndelayed?: (file: string, mtime: number) => void
-	): {
-		close(): void;
-		pause(): void;
-		getFileTimestamps(): Map<string, number>;
-		getContextTimestamps(): Map<string, number>;
-	};
-}
+import WatchFileSystem from './WatchFileSystem';
+import WatchFileSystemWatchCallback from './WatchFileSystemWatchCallback';
 
 class ReplaceWatchFileSystem implements WatchFileSystem {
 	constructor(
@@ -44,7 +19,6 @@ class ReplaceWatchFileSystem implements WatchFileSystem {
 		private tscBuildResult: TscBuildResult,
 		private tempOutDir: string
 	) {
-		//
 	}
 
 	public watch(
@@ -52,27 +26,29 @@ class ReplaceWatchFileSystem implements WatchFileSystem {
 		dirs: string[],
 		missing: string[],
 		startTime: number,
-		options: any,
+		options: webpack.ICompiler.WatchOptions,
 		callback: WatchFileSystemWatchCallback,
 		callbackUndelayed?: (file: string, mtime: number) => void
 	) {
-		return this.wfs.watch(
-			files.map((file) => {
-				// convert .ts files to .js
-				return isTsProjectSourceFile(this.tscBuildResult, file) ?
-					convertTsFileNameToJs(this.tscBuildResult, file) :
-					file;
-			}),
-			dirs,
-			missing,
-			startTime,
-			options,
+		files = files.map(
+			(file) => isTsProjectSourceFile(this.tscBuildResult, file) ?
+				convertTsFileNameToJs(this.tscBuildResult, file) :
+				file
+		);
+		const wrappedCallback: WatchFileSystemWatchCallback =
 			(err, filesModified, dirsModified, missingModified, fileTimestamps, dirTimestamps) => {
 				callback(
 					err,
 					filesModified && filesModified.map((file) => {
-						if (!isChildPath(this.tempOutDir, file)) {
-							return file;
+						const wrappedFs = this.tscBuildResult.wrappedFs;
+						if (wrappedFs) {
+							if (!wrappedFs.isChildPath(this.tempOutDir, file)) {
+								return file;
+							}
+						} else {
+							if (!isChildPath(this.tempOutDir, file)) {
+								return file;
+							}
 						}
 						// back to .ts files
 						const timestamp = fileTimestamps!.get(file);
@@ -89,9 +65,30 @@ class ReplaceWatchFileSystem implements WatchFileSystem {
 					fileTimestamps,
 					dirTimestamps
 				);
-			},
-			callbackUndelayed
-		);
+			};
+		const wrappedFs = this.tscBuildResult.wrappedFs;
+		if (wrappedFs) {
+			return wrappedFs.watchFileSystem(
+				this.wfs,
+				files,
+				dirs,
+				missing,
+				startTime,
+				options,
+				wrappedCallback,
+				callbackUndelayed
+			);
+		} else {
+			return this.wfs.watch(
+				files,
+				dirs,
+				missing,
+				startTime,
+				options,
+				wrappedCallback,
+				callbackUndelayed
+			);
+		}
 	}
 }
 

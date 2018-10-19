@@ -1,5 +1,4 @@
 
-import * as fs from 'fs';
 import * as path from 'path';
 
 import { getOptions } from 'loader-utils';
@@ -52,19 +51,21 @@ export default function tsc2webpackLoader(this: webpack.loader.LoaderContext, in
 	}
 
 	const jsFileName = convertTsFileNameToJs(tscBuildResult, sourceFileName);
-	fs.readFile(jsFileName, 'utf8', (err, jsSource) => {
+	// console.log('tsc2webpackLoader: jsFileName = ', jsFileName);
+	this._compiler.inputFileSystem.readFile(jsFileName, (err, jsSourceBuffer) => {
 		if (err) {
 			callback(err);
 		} else {
+			const jsSource = jsSourceBuffer.toString('utf8');
 			// if source-map is emitted, use it
 			if (jsSource && tscBuildResult.data.compilerOptions.sourceMap) {
-				fs.readFile(jsFileName + '.map', 'utf8', (err2, mapSource) => {
+				this._compiler.inputFileSystem.readFile(jsFileName + '.map', (err2, mapSource) => {
 					if (err2) {
 						logInfo(handlers, err2.message, err2);
 						callback(null, jsSource);
 					} else {
 						try {
-							callback(null, jsSource, JSON.parse(mapSource));
+							callback(null, jsSource, JSON.parse(mapSource.toString('utf8')));
 						} catch (e) {
 							logInfo(handlers, e && e.message || `${e}`, e);
 							callback(null, jsSource);
@@ -88,26 +89,39 @@ function emitDeclarationFile(
 	tscBuildResult: TscBuildResult
 ) {
 	const outputPath = getWebpackOutputPath(compilation.compiler) || './';
-	//console.info('** Start emit declarations');
+	// console.info('** Start emit declarations');
 	tscBuildResult.data.files.forEach((tsFile) => {
 		// generate original .d.ts file
 		const basePath = getTsBasePath(tscBuildResult);
 		const pathObject = path.parse(path.relative(basePath, tsFile));
 		delete pathObject.base;
 		pathObject.name += '.d';
-		const dtsFile = path.resolve(
-			basePath,
-			tscBuildResult.data.compilerOptions.declarationDir || tscBuildResult.data.compilerOptions.outDir!,
-			path.format(pathObject)
-		);
-		// asset name should be relative path from outputPath
-		const assetName = path.relative(outputPath, dtsFile);
+		let dtsFile: string;
+		let assetName: string;
+		const wrappedFs = tscBuildResult.wrappedFs;
+		const tscOutDir = tscBuildResult.data.compilerOptions.outDir!;
+		if (!tscBuildResult.data.compilerOptions.declarationDir && wrappedFs && wrappedFs.isWrappedFsPath(tscOutDir)) {
+			const p = wrappedFs.joinPath(tscOutDir, path.format(pathObject));
+			dtsFile = wrappedFs.resolvePath(p);
+			// in wrapped-fs mode, relative path cannot be calculated from actual output path.
+			assetName = wrappedFs.relativePath(tscOutDir, dtsFile);
+			// console.info('**** dtsFile:', dtsFile, ', assetName:', assetName);
+		} else {
+			dtsFile = path.resolve(
+				basePath,
+				tscBuildResult.data.compilerOptions.declarationDir || tscOutDir,
+				path.format(pathObject)
+			);
+			// asset name should be relative path from outputPath
+			assetName = path.relative(outputPath, dtsFile);
+		}
 		//console.info(dtsFile);
 		if (compilation.assets[assetName]) {
 			return;
 		}
 		try {
-			const content = fs.readFileSync(dtsFile, 'utf8');
+			const buffer = compilation.compiler.inputFileSystem.readFileSync(dtsFile);
+			const content = buffer.toString('utf8');
 			compilation.assets[assetName] = {
 				source: () => content,
 				size: () => content.length

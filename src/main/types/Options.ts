@@ -40,4 +40,11 @@ export default interface Options {
 		/** 'use' item(s) to be added into 'use' array *after* tsc2webpack's internal loader */
 		tail?: webpack.RuleSetUseItem | webpack.RuleSetUseItem[];
 	};
+	/**
+	 * Enables 'in-memory temporal build' mode, which temporal output data is kept
+	 * in the memory instead of file system.
+	 * If the flag is set to true, 'tempBuildDir' is ignored and
+	 * 'outDir' TypeScript compiler option is also ignored.
+	 */
+	useMemoryForTempBuild?: boolean;
 }

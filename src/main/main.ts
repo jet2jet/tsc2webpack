@@ -19,6 +19,7 @@ interface Arguments extends yargs.Arguments {
 	tsconfig?: string;
 	webpackConfig?: string;
 	tempBuildDir?: string;
+	useMemory?: boolean;
 	emitDeclarations?: boolean;
 	lang?: string;
 	watch?: boolean;
@@ -65,6 +66,7 @@ async function execCompiler(argv: Arguments) {
 			{
 				tempBuildDir: argv.tempBuildDir,
 				locale: argv.lang,
+				useMemoryForTempBuild: argv.useMemory,
 				emitDeclarations: argv.emitDeclarations,
 				handlers
 			}
@@ -84,6 +86,7 @@ async function execCompiler(argv: Arguments) {
 			{
 				tempBuildDir: argv.tempBuildDir,
 				locale: argv.lang,
+				useMemoryForTempBuild: argv.useMemory,
 				emitDeclarations: argv.emitDeclarations,
 				handlers
 			}
@@ -120,6 +123,11 @@ async function main() {
 				alias: ['tempDir'],
 				type: 'string',
 				description: 'Temporal output directory for emitted JS files from TypeScript compiler'
+			})
+			.option('useMemory', {
+				alias: ['mem'],
+				type: 'boolean',
+				description: 'Enables \'in-memory temporal build\' mode'
 			})
 			.option('emitDeclarations', {
 				alias: ['d'],

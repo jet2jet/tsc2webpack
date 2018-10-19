@@ -17,10 +17,12 @@ import TscBuildResult from './types/TscBuildResult';
 import TscConfig from './types/TscConfig';
 import WatchInstance from './types/WatchInstance';
 import {
+	convertTsFileNameToJs,
 	getTsBasePath,
 	isTsProjectSourceFile
 } from './utils/functions';
 import { handleError, logInfo, logVerbose } from './utils/log';
+import WrappedFs from './utils/WrappedFs';
 
 /** @internal */
 import './webpack/tsc2webpack-loader';
@@ -51,11 +53,17 @@ const webpackStatsOptions: webpack.Stats.ToStringOptionsObject = {
 function makeTscBuildConfigByFile(
 	basePath?: string | null | undefined,
 	tsconfig?: string | null | undefined,
-	tempBuildDir?: string | null | undefined
+	tempBuildDir?: string | null | undefined,
+	useMemoryForTempBuild?: boolean
 ): TscBuildConfig {
 	let searchPath = basePath || './';
 	let configName = 'tsconfig.json';
 	if (tsconfig) {
+		try {
+			if (!/[\\\/]$/.test(tsconfig) && fs.statSync(tsconfig).isDirectory()) {
+				tsconfig += path.sep;
+			}
+		} catch (_e) { }
 		const p = path.resolve(searchPath, tsconfig);
 		if (/[\\\/]$/.test(tsconfig)) {
 			searchPath = p + path.sep;
@@ -66,6 +74,12 @@ function makeTscBuildConfigByFile(
 			}
 			configName = base;
 		}
+	} else {
+		try {
+			if (!/[\\\/]$/.test(searchPath) && fs.statSync(searchPath).isDirectory()) {
+				searchPath += path.sep;
+			}
+		} catch (_e) { }
 	}
 
 	const configPath = ts.findConfigFile(
@@ -87,27 +101,39 @@ function makeTscBuildConfigByFile(
 		throw new TypeScriptError(parseResult.errors);
 	}
 
-	if (tempBuildDir) {
-		parseResult.options.outDir = path.resolve(tempBuildDir);
+	const extendedCompilerOptions = {
+		outDir: ''
+	};
+	if (useMemoryForTempBuild) {
+		extendedCompilerOptions.outDir = WrappedFs.ROOT_PATH;
+	} else if (tempBuildDir) {
+		extendedCompilerOptions.outDir = path.resolve(tempBuildDir);
 	} else if (!parseResult.options.outDir) {
-		parseResult.options.outDir = path.resolve('.tsw-work');
+		extendedCompilerOptions.outDir = path.resolve('.tsw-work');
 	} else {
-		parseResult.options.outDir = path.resolve(configDir, parseResult.options.outDir);
+		extendedCompilerOptions.outDir = path.resolve(configDir, parseResult.options.outDir);
 	}
 
 	return {
 		configDirectory: configDir,
 		data: {
-			compilerOptions: parseResult.options,
+			compilerOptions: {
+				...parseResult.options,
+				...extendedCompilerOptions
+			},
 			files: parseResult.fileNames
-		}
+		},
+		configFileName: configPath,
+		extendedCompilerOptions,
+		wrappedFs: useMemoryForTempBuild ? new WrappedFs() : null
 	};
 }
 
 function makeTscBuildConfigByObject(
 	basePath: string,
 	tscConfig: TscConfig,
-	tempBuildDir?: string | null | undefined
+	tempBuildDir?: string | null | undefined,
+	useMemoryForTempBuild?: boolean
 ): TscBuildConfig {
 	const result: TscBuildConfig = {
 		configDirectory: basePath,
@@ -116,9 +142,12 @@ function makeTscBuildConfigByObject(
 			compilerOptions: {
 				...tscConfig.compilerOptions
 			}
-		}
+		},
+		wrappedFs: useMemoryForTempBuild ? new WrappedFs() : null
 	};
-	if (tempBuildDir) {
+	if (useMemoryForTempBuild) {
+		result.data.compilerOptions.outDir = WrappedFs.ROOT_PATH;
+	} else if (tempBuildDir) {
 		result.data.compilerOptions.outDir = tempBuildDir;
 	}
 	return result;
@@ -127,6 +156,21 @@ function makeTscBuildConfigByObject(
 function executeTsc(config: TscBuildConfig, handlers: Handlers | undefined, locale?: string | undefined): TscBuildResult {
 	const options: ts.CompilerOptions = { ...config.data.compilerOptions, locale };
 	const host = ts.createCompilerHost(options);
+	if (config.wrappedFs) {
+		const fs = config.wrappedFs;
+		host.writeFile = (fileName: string, data: string, writeByteOrderMark: boolean, onError: ((message: string) => void) | undefined) => {
+			try {
+				fs.writeFile(fileName, data, writeByteOrderMark);
+			} catch (e) {
+				onError && onError(e && (e.message || e.toString()) || 'Unexpected error');
+			}
+		};
+		host.fileExists = (fileName) => fs.fileExists(fileName);
+		host.readFile = (fileName) => fs.readFile(fileName);
+		host.directoryExists = (directoryName) => fs.directoryExists(directoryName);
+		host.getDirectories = (p) => fs.getDirectories(p);
+		host.realpath = (p) => fs.realpath(p);
+	}
 	const program = ts.createProgram(config.data.files, options, host);
 	const result = program.emit();
 	if (result.diagnostics && result.diagnostics.length > 0) {
@@ -139,17 +183,83 @@ function executeTsc(config: TscBuildConfig, handlers: Handlers | undefined, loca
 	};
 }
 
+function _calculateDeletedFiles(oldFiles: ReadonlyArray<string>, newFiles: ReadonlyArray<string>): string[] {
+	return oldFiles.filter((file) => newFiles.indexOf(file) < 0);
+}
+
 function watchTsc(config: TscBuildConfig, handlers: Handlers | undefined, locale?: string | undefined): TscBuildResult {
 	let watchStarted = false;
 
-	const host = ts.createWatchCompilerHost(
-		config.data.files,
-		{ ...config.data.compilerOptions, locale },
-		ts.sys,
-		createProgramForWatching,
-		reportDiagnostic,
-		reportWatchStatusChanged
-	);
+	const host = config.configFileName ?
+		ts.createWatchCompilerHost(
+			config.configFileName,
+			{ ...(config.extendedCompilerOptions || {}), locale },
+			config.wrappedFs || ts.sys,
+			createProgramForWatching,
+			reportDiagnostic,
+			reportWatchStatusChanged
+		) :
+		ts.createWatchCompilerHost(
+			config.data.files,
+			{ ...config.data.compilerOptions, locale },
+			config.wrappedFs || ts.sys,
+			createProgramForWatching,
+			reportDiagnostic,
+			reportWatchStatusChanged
+		);
+
+	// Overrides host.createProgram because the 'host' parameter of createProgram
+	// will differ from the result of createWatchCompilerHost
+	(() => {
+		const fs = config.wrappedFs;
+
+		const origCreateProgram = host.createProgram;
+		host.createProgram = function (this: typeof host, rootNames, options, compilerHost, oldProgram) {
+			// adjust compiler options
+			options.outDir = config.data.compilerOptions.outDir;
+			options.locale = config.data.compilerOptions.locale;
+			config.data.compilerOptions = { ...options };
+
+			// handle deleted files
+			if (fs) {
+				Promise.resolve(
+					_calculateDeletedFiles(config.data.files, rootNames).map(
+						(file) => convertTsFileNameToJs(config, file)
+					)
+				).then((deletedFiles) => {
+					fs.onFileDeleted(deletedFiles);
+				});
+			}
+			config.data.files = rootNames.slice(0);
+
+			if (fs && compilerHost) {
+				compilerHost.writeFile = (fileName: string, data: string, writeByteOrderMark: boolean, onError: ((message: string) => void) | undefined) => {
+					// almost same implementation as local 'writeFile' function in 'createWatchProgram'
+					try {
+						const performance: any = (ts as any).performance;
+						if (performance) {
+							performance.mark('beforeIOWrite');
+						}
+						// 'ensureDirectoryExists' is not necessary because
+						// WrappedFs's writeFile will automatically create directories
+						fs.writeFile(fileName, data, writeByteOrderMark);
+						if (performance) {
+							performance.mark('afterIOWrite');
+							performance.measure('I/O Write', 'beforeIOWrite', 'afterIOWrite');
+						}
+					} catch (e) {
+						onError && onError(e.message);
+					}
+				};
+				compilerHost.fileExists = (fileName) => fs.fileExists(fileName);
+				compilerHost.readFile = (fileName) => fs.readFile(fileName);
+				compilerHost.directoryExists = (directoryName) => fs.directoryExists(directoryName);
+				compilerHost.getDirectories = (p) => fs.getDirectories(p);
+				compilerHost.realpath = (p) => fs.realpath(p);
+			}
+			return origCreateProgram.call(this, rootNames, options, compilerHost, oldProgram);
+		};
+	})();
 
 	// To stop watching, monitor and store timers;
 	// when stopping watching, reset all timers.
@@ -161,14 +271,17 @@ function watchTsc(config: TscBuildConfig, handlers: Handlers | undefined, locale
 		origClearTimeout(timeoutId);
 	};
 	host.setTimeout = (callback, ms, ...args) => {
-		const timeoutId = origSetTimeout(callback, ms, ...args);
+		const timeoutId = origSetTimeout((...args2) => {
+			timeoutIds = timeoutIds.filter((id) => id !== timeoutId);
+			callback(...args2);
+		}, ms, ...args);
 		timeoutIds.push(timeoutId);
 		return timeoutId;
 	};
 
 	// `createWatchProgram` creates an initial program, watches files, and updates
 	// the program over time.
-	ts.createWatchProgram(host);
+	ts.createWatchProgram(host as any);
 	watchStarted = true;
 
 	handlers && handlers.onTsCompileFinished && handlers.onTsCompileFinished(config.data);
@@ -306,6 +419,7 @@ function handleWebpackLog(handlers: Handlers | undefined, stats: webpack.Stats) 
 }
 
 function executeWebpack(
+	tscConfig: TscBuildConfig,
 	tscBuildResult: TscBuildResult,
 	conf: webpack.Configuration | null | undefined,
 	options: Options | undefined
@@ -318,6 +432,11 @@ function executeWebpack(
 	);
 	delete config.watch;
 	const compiler = webpack(config);
+
+	if (tscConfig.wrappedFs) {
+		const inputFileSystem = compiler.inputFileSystem;
+		compiler.inputFileSystem = tscConfig.wrappedFs.makeInputFileSystem(inputFileSystem, tscConfig);
+	}
 
 	const handlers = options && options.handlers;
 	return new Promise<void>((resolve) => {
@@ -338,6 +457,7 @@ function executeWebpack(
 }
 
 function watchWebpack(
+	tscConfig: TscBuildConfig,
 	tscBuildResult: TscBuildResult,
 	conf: webpack.Configuration | null | undefined,
 	options: Options | undefined
@@ -349,6 +469,11 @@ function watchWebpack(
 		options
 	);
 	const compiler = webpack(config);
+
+	if (tscConfig.wrappedFs) {
+		const inputFileSystem = compiler.inputFileSystem;
+		compiler.inputFileSystem = tscConfig.wrappedFs.makeInputFileSystem(inputFileSystem, tscConfig);
+	}
 
 	const handlers = options && options.handlers;
 	let isWatching = false;
@@ -430,8 +555,8 @@ export async function execute(
 	const handlers = options && options.handlers;
 	const config = (
 		tsconfig && typeof (tsconfig) !== 'string' ?
-			makeTscBuildConfigByObject(basePath!, tsconfig, options && options.tempBuildDir) :
-			makeTscBuildConfigByFile(basePath, tsconfig, options && options.tempBuildDir)
+			makeTscBuildConfigByObject(basePath!, tsconfig, options && options.tempBuildDir, options && options.useMemoryForTempBuild) :
+			makeTscBuildConfigByFile(basePath, tsconfig, options && options.tempBuildDir, options && options.useMemoryForTempBuild)
 	);
 	await reportExecutionTime('Execute...', 'Done.', handlers, async () => {
 		let tscBuildResult: TscBuildResult;
@@ -441,6 +566,7 @@ export async function execute(
 		await reportExecutionTime(
 			'Execute webpack...', 'webpack finished.', handlers,
 			() => executeWebpack(
+				config,
 				tscBuildResult,
 				webpackConfig,
 				options
@@ -489,8 +615,8 @@ export async function watch(
 	const handlers = options && options.handlers;
 	const config = (
 		tsconfig && typeof (tsconfig) !== 'string' ?
-			makeTscBuildConfigByObject(basePath!, tsconfig, options && options.tempBuildDir) :
-			makeTscBuildConfigByFile(basePath, tsconfig, options && options.tempBuildDir)
+			makeTscBuildConfigByObject(basePath!, tsconfig, options && options.tempBuildDir, options && options.useMemoryForTempBuild) :
+			makeTscBuildConfigByFile(basePath, tsconfig, options && options.tempBuildDir, options && options.useMemoryForTempBuild)
 	);
 	return await reportExecutionTime('Start watching...', 'Done.', handlers, async () => {
 		let tscBuildResult: TscBuildResult;
@@ -501,6 +627,7 @@ export async function watch(
 		const w2 = await reportExecutionTime(
 			'Starting webpack...', 'webpack started.', handlers,
 			() => watchWebpack(
+				config,
 				tscBuildResult,
 				webpackConfig,
 				options
@@ -570,8 +697,8 @@ export function createWebpackFunction(
 	const handlers = options && options.handlers;
 	const config = (
 		tsconfig && typeof (tsconfig) !== 'string' ?
-			makeTscBuildConfigByObject(basePath!, tsconfig, options && options.tempBuildDir) :
-			makeTscBuildConfigByFile(basePath, tsconfig, options && options.tempBuildDir)
+			makeTscBuildConfigByObject(basePath!, tsconfig, options && options.tempBuildDir, options && options.useMemoryForTempBuild) :
+			makeTscBuildConfigByFile(basePath, tsconfig, options && options.tempBuildDir, options && options.useMemoryForTempBuild)
 	);
 
 	function wrappedWebpack(options: webpack.Configuration): webpack.Compiler;
@@ -599,11 +726,19 @@ export function createWebpackFunction(
 				watchMode,
 				options
 			));
+			let compiler;
 			if (handler) {
-				return webpack(newConf, handler as webpack.MultiCompiler.Handler);
+				compiler = webpack(newConf, handler as webpack.MultiCompiler.Handler);
 			} else {
-				return webpack(newConf);
+				compiler = webpack(newConf);
 			}
+			if (tscBuildResult.wrappedFs && (compiler as webpack.MultiCompiler).compilers) {
+				(compiler as webpack.MultiCompiler).compilers.forEach((compiler) => {
+					const inputFileSystem = compiler.inputFileSystem;
+					compiler.inputFileSystem = tscBuildResult.wrappedFs!.makeInputFileSystem(inputFileSystem, tscBuildResult);
+				});
+			}
+			return compiler;
 		} else {
 			const newConf = initializeWebpackConfiguration(
 				tscBuildResult,
@@ -611,11 +746,17 @@ export function createWebpackFunction(
 				watchMode,
 				options
 			);
+			let compiler;
 			if (handler) {
-				return webpack(newConf, handler as webpack.Compiler.Handler);
+				compiler = webpack(newConf, handler as webpack.Compiler.Handler);
 			} else {
-				return webpack(newConf);
+				compiler = webpack(newConf);
 			}
+			if (tscBuildResult.wrappedFs && (compiler as webpack.Compiler).inputFileSystem) {
+				const inputFileSystem = (compiler as webpack.Compiler).inputFileSystem;
+				(compiler as webpack.Compiler).inputFileSystem = tscBuildResult.wrappedFs.makeInputFileSystem(inputFileSystem, tscBuildResult);
+			}
+			return compiler;
 		}
 	}
 
