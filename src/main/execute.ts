@@ -281,7 +281,7 @@ function watchTsc(config: TscBuildConfig, handlers: Handlers | undefined, locale
 
 	// `createWatchProgram` creates an initial program, watches files, and updates
 	// the program over time.
-	ts.createWatchProgram(host as any);
+	const watchProgram = ts.createWatchProgram(host as any);
 	watchStarted = true;
 
 	handlers && handlers.onTsCompileFinished && handlers.onTsCompileFinished(config.data);
@@ -297,6 +297,13 @@ function watchTsc(config: TscBuildConfig, handlers: Handlers | undefined, locale
 				timeoutIds.splice(0).forEach((id) => {
 					origClearTimeout(id);
 				});
+			},
+			updateTsFiles(files: ReadonlyArray<string>) {
+				if (config.configFileName) {
+					return;
+				}
+				config.data.files = files.slice(0);
+				watchProgram.updateRootFileNames(config.data.files);
 			}
 		}
 	};
@@ -492,15 +499,16 @@ function watchWebpack(
 			}
 		});
 		resolve(r);
-	}).then((watching) => {
+	}).then((watching): WatchInstance => {
 		isWatching = true;
 		handlers && handlers.onWebpackFinished && handlers.onWebpackFinished(tscBuildResult.data, config);
-		return <WatchInstance>{
+		return {
 			stop() {
 				return new Promise<void>((resolve) => {
 					watching.close(resolve);
 				});
-			}
+			},
+			updateTsFiles() { }
 		}
 	});
 }
@@ -618,7 +626,7 @@ export async function watch(
 			makeTscBuildConfigByObject(basePath!, tsconfig, options && options.tempBuildDir, options && options.useMemoryForTempBuild) :
 			makeTscBuildConfigByFile(basePath, tsconfig, options && options.tempBuildDir, options && options.useMemoryForTempBuild)
 	);
-	return await reportExecutionTime('Start watching...', 'Done.', handlers, async () => {
+	return await reportExecutionTime('Start watching...', 'Done.', handlers, async (): Promise<WatchInstance> => {
 		let tscBuildResult: TscBuildResult;
 		const w1 = await reportExecutionTime('Execute TypeScript compiler...', 'TypeScript compilation finished.', handlers, async () => {
 			tscBuildResult = watchTsc(config, handlers, locale || void (0));
@@ -636,6 +644,9 @@ export async function watch(
 		return {
 			async stop() {
 				await Promise.all([w1.stop(), w2.stop()]);
+			},
+			updateTsFiles(files) {
+				w1.updateTsFiles(files);
 			}
 		};
 	});
