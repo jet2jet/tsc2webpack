@@ -1,7 +1,7 @@
 
 import * as path from 'path';
 
-import { getOptions } from 'loader-utils';
+import { getOptions, getRemainingRequest } from 'loader-utils';
 import * as webpack from 'webpack';
 
 import Handlers from '../types/Handlers';
@@ -65,7 +65,9 @@ export default function tsc2webpackLoader(this: webpack.loader.LoaderContext, in
 						callback(null, jsSource);
 					} else {
 						try {
-							callback(null, jsSource, JSON.parse(mapSource.toString('utf8')));
+							const { output, sourceMap } =
+								makeSourceMap(jsSource, mapSource.toString('utf8'), input, sourceFileName, this);
+							callback(null, output, sourceMap);
 						} catch (e) {
 							logInfo(handlers, e && e.message || `${e}`, e);
 							callback(null, jsSource);
@@ -77,6 +79,24 @@ export default function tsc2webpackLoader(this: webpack.loader.LoaderContext, in
 			}
 		}
 	});
+}
+
+// from ts-loader program
+function makeSourceMap(
+	jsSource: string,
+	sourceMapText: string,
+	originalInput: any,
+	tsFileName: string,
+	loader: webpack.loader.LoaderContext
+) {
+	return {
+		output: jsSource.replace(/^\/\/# sourceMappingURL=[^\r\n]*/gm, ''),
+		sourceMap: Object.assign(JSON.parse(sourceMapText), {
+			sources: [getRemainingRequest(loader)],
+			file: tsFileName,
+			sourcesContent: [originalInput]
+		})
+	};
 }
 
 function getWebpackOutputPath(compiler: webpack.Compiler) {
