@@ -40,6 +40,7 @@ Options:
                                                                        [boolean]
   --tempBuildDir, --tempDir    Temporal output directory for emitted JS files
                                from TypeScript compiler                 [string]
+  --useMemory, --mem           Enables 'in-memory temporal build' mode [boolean]
   --emitDeclarations, -d       Enables to emit declaration files as assets of
                                webpack                                 [boolean]
   --lang, --locale             The locale/language for TypeScript messages
@@ -77,6 +78,10 @@ Specifies if using 'watch' mode (using 'watch' mode of TypeScript compiler and w
 Specifies the temporal output directory for emitted JS files from TypeScript compiler. If specified, this overrides `outDir` compiler option of `tsconfig.json`.
 
 When webpack process runs, all entry points and modules referring each TypeScript source files in `tsconfig.json` are replaced by the each JS files in `tempBuildDir`.
+
+#### --useMemory, --mem (boolean)
+
+Enables 'in-memory temporal build' mode, which temporal output data (JS file content) is kept in the memory instead of file system. If the flag is set to true, 'tempBuildDir' is ignored and 'outDir' TypeScript compiler option is also ignored.
 
 #### --emitDeclarations, -d (boolean)
 
