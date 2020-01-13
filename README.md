@@ -3,6 +3,8 @@
 tsc2webpack
 ==========
 
+**NOTE: This project is no longer maintained.**
+
 (Beta) A build tool that calls TypeScript compiler and webpack process sequentially.
 
 ## When to use
